@@ -2,7 +2,8 @@
 // MODIFIED FILE: derived from Herdr 0.1.13's shipped `spaces` mod
 // (Copyright the Herdr authors, https://herdr.dev, Apache-2.0, see
 // LICENSE-APACHE). Changes: project grouping from projects.json, project
-// headers, action buttons, server toggle, project jump, reload settling.
+// headers, action buttons, server toggle, project jump, reload settling,
+// a + that creates projects.
 //
 // Projects: spaces grouped by project across machines (projects.json in this
 // folder), each project with its combined agent status, branch and quick actions;
@@ -13,8 +14,8 @@
 // switch, right-click for its menu, drag to reorder.
 
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, readTextFile, appHome, nextCommand, notify } from "herdr";
+import { v_flex, h_flex, InputState, Input } from "gpui-base";
+import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, readTextFile, writeTextFile, appHome, nextCommand, notify } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -85,6 +86,12 @@ export default class Spaces extends View {
     // Server actions: is their port listening? Asked while the window is in front
     // and the project unfolded (lsof is quick, but it is a process each time).
     this.listening = {}; // port -> true/false
+    // The title's +: a name field for a new project (see createProject).
+    this.creating = false;
+    this.newName = InputState.new();
+    this.newEmpty = true;
+    this.newName.on("change", (_e, cx) => { this.newEmpty = !this.newName.value(); cx.notify(); });
+    this.newName.on("submit", (_e, cx) => this.createProject(cx));
     // After a reload every space's git is unknown, so repo rules can't place it
     // yet: until git answers (at most SETTLE ms), it waits instead of showing
     // under "Other spaces" and jumping into its project a moment later.
@@ -92,7 +99,7 @@ export default class Spaces extends View {
     cx.timer.after(SETTLE + 100, (cx) => cx.notify());
     cx.timer.every(4000, (cx) => this.checkPorts(cx));
     // Keys: "projects.jump" (ctrl-shift-j) goes to the next space of this project.
-    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "jump") this.jump(); cx.notify(); } });
+    cx.spawn(async (cx) => { for (;;) { const c = await nextCommand(); if (c === "jump") this.jump(); else if (c === "new") this.openCreate(); cx.notify(); } });
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // `git status` walks the whole tree, on another machine a process there:
@@ -379,6 +386,78 @@ export default class Spaces extends View {
       this.portsBusy = false;
       if (changed) cx.notify();
     });
+  }
+
+  openCreate() {
+    this.creating = true;
+    this.newName.set_value("");
+    this.newEmpty = true;
+    this.newName.focus();
+  }
+
+  // What a new project would take: the selected space, unless a project has it.
+  newTarget() {
+    const w = spaces().find((s) => s.active);
+    if (!w) return { w: null, rule: null, owner: null };
+    const g = this.git[where(w, panes())];
+    const owner = this.projectFor(w, g);
+    const rule = owner ? null : g?.name ? { repo: g.name } : { space: w.name };
+    return { w, rule, owner };
+  }
+
+  // Appends { name, match } to projects.json (compare-and-swap, a few tries).
+  // Saving it reloads this mod, which then shows the project.
+  createProject(cx) {
+    const name = this.newName.value().trim();
+    if (!name) return;
+    if (this.projects.some((p) => p.name === name)) {
+      notify({ title: `"${name}" already exists`, body: "Pick another name.", level: "warning", timeout: 4000 });
+      return;
+    }
+    const { w, rule } = this.newTarget();
+    this.creating = false;
+    cx.notify();
+    cx.spawn(async () => {
+      const file = `${appHome()}/mods/projects/projects.json`;
+      try {
+        for (let tries = 0; ; tries++) {
+          const text = await readTextFile(file);
+          const d = text ? JSON.parse(text) : {};
+          d.projects = [...(d.projects ?? []), { name, match: rule ? [rule] : [] }];
+          try {
+            await writeTextFile(file, `${JSON.stringify(d, null, 2)}\n`, text);
+            break;
+          } catch (e) {
+            if (tries >= 2) throw e; // changed meanwhile: read it again
+          }
+        }
+        notify(rule
+          ? { title: `Project "${name}" created`, body: `With ${w.name} (${rule.repo ? `repo ${rule.repo}` : `space "${rule.space}"`}).`, level: "success", timeout: 4000 }
+          : { title: `Project "${name}" created, empty`, body: "Add match rules (repo, machine, space) in mods/projects/projects.json.", level: "info", timeout: 6000 });
+      } catch (e) {
+        notify({ title: "Couldn't create the project", body: String(e?.message ?? e), level: "error" });
+      }
+    });
+  }
+
+  newProjectRow(t) {
+    const { w, rule, owner } = this.newTarget();
+    const hint = !w ? "No space selected: it starts empty"
+      : owner ? `${w.name} is in ${owner.name}: it starts empty`
+      : `Adds ${w.name}${rule.repo ? ` (repo ${rule.repo})` : ""}`;
+    const cancel = (cx) => { this.creating = false; cx.notify(); };
+    return v_flex().id("project-create").flex_none().px(8).pb(8).gap(4)
+      .on_key_down((e, cx) => { if (e.keystroke === "escape" || e.key === "escape") { cx.stop_propagation(); cancel(cx); } })
+      .child(h_flex().gap(4).items_center()
+        .child(div().relative().flex_1().min_w(0)
+          .child(Input.new(this.newName).h(28).px(8).rounded(6).border(1).border_color(t.accent)
+            .bg(t.background).text_size(12.5).text_color(t.foreground))
+          .when(this.newEmpty, (el) => el.child(div().absolute().left(9).top(0).h(28).flex().items_center()
+            .text_size(12.5).text_color(t.dim).child("New project name"))))
+        .child(div().id("project-create-cancel").size(24).flex_none().flex().items_center().justify_center().rounded(6)
+          .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip("Cancel (Esc)")
+          .on_click((_e, cx) => cancel(cx)).child(svg("mods/workspace-chrome/x.svg").size(12))))
+      .child(div().px(2).text_size(11).text_color(t.dim).truncate().child(`${hint} · Enter to create`));
   }
 
   // A server action's terminal: the pane of its tab (by name) in the project's
@@ -688,8 +767,14 @@ export default class Spaces extends View {
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(!collapsed, el => el.child("Projects"))
-        .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14))))
+        .child(div().id("project-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("New project")
+          .on_click((_e, cx) => {
+            if (this.creating) this.creating = false;
+            else this.openCreate();
+            cx.notify();
+          }).child(svg("mods/workspace-chrome/plus.svg").size(14))))
+      .when(this.creating && !collapsed, (el) => el.child(this.newProjectRow(t)))
       .child(v_flex().flex_1().min_h(0).px(8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
         .children(this.grouped(t, collapsed)));

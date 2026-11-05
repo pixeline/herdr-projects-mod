@@ -17,7 +17,14 @@ Top to bottom, in the sidebar block (Herdr's `main` layout, `spaces` slot,
 268px wide, `chrome` background, 13px text):
 
 1. **Title row, 31px.** "Projects" (11.5px, `dim`, 16px left padding) and a
-   26px `+` button (`mods/workspace-chrome/plus.svg`, 14px) that runs `space.new`.
+   26px `+` button (`mods/workspace-chrome/plus.svg`, 14px, tooltip "New
+   project") that opens the new-project field below it (again: closes it).
+   **New-project field** (8px sides, 8px below, 4px gap): a 28px input,
+   radius 6, 1px `accent` border, `background` fill, 12.5px text, placeholder
+   "New project name" in `dim`; a 24px ✕ (`x.svg`, 12px, `dim`) to cancel;
+   under it an 11px `dim` hint: "Adds <space> (repo <name>) · Enter to create",
+   "<space> is in <project>: it starts empty · Enter to create", or
+   "No space selected: it starts empty · Enter to create".
 2. **One group per project**, in `projects.json` order, inside the list (8px side
    padding, 14px bottom padding, always-visible scrollbar):
    - **Header, 28px**, radius 6, 8px side padding, 7px gap, 12px text. 16px
@@ -66,6 +73,13 @@ Herdr's compact rows (number and status glyph), no action rows.
   first terminal's live folder.
 - **Fold.** Clicking a header folds or unfolds it. The folded set is kept in
   the copy's `localStorage` under `projects.folded`.
+- **New project.** Enter in the field appends `{ name, match }` to
+  `projects.json` with `writeTextFile(path, text, expected)` (re-read and
+  retried on a stale read, 3 tries), then the save reloads the mod. `match` takes
+  the selected space when no project has it: `{ repo }` for a git checkout,
+  else `{ space: <name> }`; otherwise `[]` (an empty project, its header with
+  no rows). A toast says which. A name already used is refused with a warning.
+  Esc or ✕ cancels. `projects.new` opens the field too (bind it to a key).
 - **Jump.** `ctrl-shift-j` (`projects.jump`) selects the next space of the
   shown space's project, wrapping, across machines. It works only while the
   sidebar shows.
@@ -111,6 +125,8 @@ Herdr's compact rows (number and status glyph), no action rows.
   - `projectHead`, `actionBar`, `serverButton`, `otherHead` draw the parts above.
   - `act`, `server`, `toggleServer`, `checkPorts` handle the actions.
   - `jump` handles `ctrl-shift-j`.
+  - `openCreate`, `newTarget`, `createProject`, `newProjectRow`: the title's `+`
+    (an `InputState` + `Input` from `gpui-base`, Esc caught on the row's `on_key_down`).
   - `row()` takes `member` for the server icon.
   - Constants: `GAP = 16` (px above headers), `SETTLE = 5000` (ms).
 - **Config:** `mods/projects/projects.json` (the person's own; the shared
@@ -137,7 +153,7 @@ Herdr's compact rows (number and status glyph), no action rows.
   `file-text`, `layers`, `server`, `folder`, `git-branch`, ….
 - **Keys:** `keys.json` `global`: `"ctrl-shift-j": "projects.jump"`.
 - **herdr:** `spaces`, `machines`, `panes`, `theme`, `shared`/`setShared`
-  (`space.colors`), `window` (`active`), `layout`, `readTextFile`, `appHome`,
+  (`space.colors`), `window` (`active`), `layout`, `readTextFile`, `writeTextFile`, `appHome`,
   `nextCommand`, `notify`, `openOverlay` (`confirm`), `run` (`space.select`,
   `space.new`, `space.move`, `tab.new`, `tab.select`), `exec` (`git`, `lsof`,
   `open`; git runs on the space's machine with `on`), `hc` (`send`, `interrupt`,
@@ -164,6 +180,11 @@ Herdr's compact rows (number and status glyph), no action rows.
 - Spaces nobody named are called after their folder: two spaces in one repo
   get the same name. Rename one.
 - A `machine` rule claims every space on that machine.
+- Herdr's `prompt` dialog can only run an app command, and a mod's own
+  commands carry no arguments, so the typed name would be lost: the name
+  field lives in the sidebar instead.
+- The `+` used to run `space.new` (Herdr's Spaces). New spaces now come from a
+  machine header's `+`, Herdr's key or the palette.
 - `projects.jump` reaches shown copies only: with the sidebar hidden, nothing happens.
 - Rewriting `keys.json` (even formatting) makes it the person's: Herdr stops
   adding new default shortcuts to it.
@@ -186,6 +207,9 @@ Herdr's compact rows (number and status glyph), no action rows.
   an unpushed commit shows `↑1` on the header and the row.
 - Clicking the header folds it; the fold survives a reload.
 - `ctrl-shift-j` moves between the project's spaces.
+- With a space outside every project selected, `+`, a name and Enter make a
+  project holding that space, and it leaves "Other spaces"; with a space that
+  is already in a project, the new project shows as an empty header.
 - A `url` chip opens the browser; a `reuse` chip opens its tab once and then
   selects it; a `confirm` chip asks first and Escape runs nothing.
 - With a server on its port, the server chip reads "Stop server" with a

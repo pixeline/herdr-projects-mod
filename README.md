@@ -5,7 +5,8 @@ A sidebar mod for [Herdr](https://herdr.dev) that groups spaces by
 sit under one header, with the project's agent status, branch, ahead/behind,
 and a row of buttons (open a URL, a shell or log tail on another machine, a
 deploy behind a confirmation, a local dev server start/stop that shows
-whether its port listens). `ctrl-shift-j` jumps between a project's spaces.
+whether its port listens). `ctrl-shift-j` jumps between a project's spaces,
+and the `+` next to the title creates a project from the selected space.
 
 ![Projects](preview.png)
 
