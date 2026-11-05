@@ -3,7 +3,7 @@
 // (Copyright the Herdr authors, https://herdr.dev, Apache-2.0, see
 // LICENSE-APACHE). Changes: project grouping from projects.json, project
 // headers, action buttons, server toggle, project jump, reload settling,
-// a + that creates projects.
+// a + that creates projects, a + per project that starts a space in it.
 //
 // Projects: spaces grouped by project across machines (projects.json in this
 // folder), each project with its combined agent status, branch and quick actions;
@@ -15,7 +15,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, readTextFile, writeTextFile, appHome, nextCommand, notify } from "herdr";
+import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, readTextFile, writeTextFile, appHome, nextCommand, notify, pickFolder } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -38,6 +38,16 @@ function place(s, ps) {
 const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
 const base = (path) => path.replace(/\/+$/, "").split("/").pop();
+// Is `dir` that folder or inside it?
+const under = (dir, folder) => {
+  const f = String(folder ?? "").replace(/\/+$/, "");
+  return !!dir && !!f && (dir === f || dir.startsWith(`${f}/`));
+};
+// Where a space's terminals work now, and where it was made.
+function folders(s, ps) {
+  const tabs = new Set((s.tabs ?? []).map((c) => c.id));
+  return [...new Set([...ps.filter((p) => tabs.has(p.tab) && p.cwd).map((p) => p.cwd), s.folder].filter(Boolean))];
+}
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
@@ -347,10 +357,71 @@ export default class Spaces extends View {
 
   // The first project with a rule this space fits. A rule's fields must all
   // hold: repo (its git repo's name, worktrees included), machine (null: here), space (its name).
-  projectFor(w, g) {
+  // folder: any of the space's terminals works in that folder or below it.
+  projectFor(w, g, ps) {
+    let dirs;
+    const inFolder = (v) => (dirs ??= folders(w, ps ?? panes())).some((d) => under(d, v));
     const fits = (rule) => Object.entries(rule).every(([k, v]) =>
-      k === "repo" ? g?.name === v : k === "machine" ? (w.machine ?? null) === v : k === "space" ? w.name === v : false);
+      k === "repo" ? g?.name === v : k === "machine" ? (w.machine ?? null) === v : k === "space" ? w.name === v
+        : k === "folder" ? inFolder(v) : false);
     return this.projects.find((p) => (p.match ?? []).some(fits)) ?? null;
+  }
+
+  // Changes projects.json: change(d) applied to what is on disk now, written only
+  // if nobody wrote in between (else read and apply again, 3 tries). Saving
+  // reloads this mod.
+  async updateConfig(change) {
+    const file = `${appHome()}/mods/projects/projects.json`;
+    for (let tries = 0; ; tries++) {
+      const text = await readTextFile(file);
+      const d = text ? JSON.parse(text) : {};
+      d.projects ??= [];
+      change(d);
+      try {
+        await writeTextFile(file, `${JSON.stringify(d, null, 2)}\n`, text);
+        return;
+      } catch (e) {
+        if (tries >= 2) throw e;
+      }
+    }
+  }
+
+  // The project's +: a new space in it. Where: the folder of its first local
+  // space in a git checkout (else its first in one), else a folder picked now.
+  // Then, unless a rule already takes that folder, one is added: { repo } for a
+  // checkout, else { folder } (with its machine).
+  addSpace(p, mine) {
+    const ps = panes();
+    const from = mine.find((r) => !r.w.machine && r.g) ?? mine.find((r) => r.g);
+    const known = from ? { folder: place(from.w, ps), machine: from.w.machine ?? null } : null;
+    return async (cx) => {
+      try {
+        let { folder, machine } = known ?? { folder: null, machine: null };
+        if (!folder) {
+          folder = await pickFolder({ prompt: `Folder for a new space in ${p.name}` });
+          if (!folder) return;
+          folder = folder.replace(/\/+$/, "");
+        }
+        let repo = null;
+        try {
+          const r = await exec("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], { cwd: folder, on: machine });
+          const c = r.code === 0 ? r.stdout.trim() : "";
+          if (c) repo = c.endsWith("/.git") ? base(c.slice(0, -5)) : base(c).replace(/\.git$/, "");
+        } catch {}
+        run("space.new", { folder, machine: machine ?? "" });
+        const covered = (p.match ?? []).some((rule) => Object.keys(rule).length && Object.entries(rule).every(([k, v]) =>
+          k === "repo" ? repo === v : k === "machine" ? (v ?? null) === machine : k === "folder" ? under(folder, v) : false));
+        if (covered) return;
+        const rule = repo ? { repo } : { folder, ...(machine ? { machine } : {}) };
+        await this.updateConfig((d) => {
+          const q = d.projects.find((x) => x.name === p.name);
+          if (q) q.match = [...(q.match ?? []), rule];
+        });
+        notify({ title: `${p.name} now takes ${repo ? `repo ${repo}` : folder}`, body: "Added to its match rules in projects.json.", level: "info", timeout: 5000 });
+      } catch (e) {
+        notify({ title: `Couldn't add a space to ${p.name}`, body: String(e?.message ?? e), level: "error" });
+      }
+    };
   }
 
   // The next space of the shown space's project, across machines.
@@ -358,9 +429,9 @@ export default class Spaces extends View {
     const sp = spaces(), ps = panes();
     const cur = sp.find((s) => s.active);
     if (!cur) return;
-    const p = this.projectFor(cur, this.git[where(cur, ps)]);
+    const p = this.projectFor(cur, this.git[where(cur, ps)], ps);
     if (!p) return;
-    const members = sp.filter((s) => this.projectFor(s, this.git[where(s, ps)]) === p);
+    const members = sp.filter((s) => this.projectFor(s, this.git[where(s, ps)], ps) === p);
     if (members.length < 2) return;
     run("space.select", { id: members[(members.indexOf(cur) + 1) % members.length].id });
   }
@@ -418,22 +489,11 @@ export default class Spaces extends View {
     this.creating = false;
     cx.notify();
     cx.spawn(async () => {
-      const file = `${appHome()}/mods/projects/projects.json`;
       try {
-        for (let tries = 0; ; tries++) {
-          const text = await readTextFile(file);
-          const d = text ? JSON.parse(text) : {};
-          d.projects = [...(d.projects ?? []), { name, match: rule ? [rule] : [] }];
-          try {
-            await writeTextFile(file, `${JSON.stringify(d, null, 2)}\n`, text);
-            break;
-          } catch (e) {
-            if (tries >= 2) throw e; // changed meanwhile: read it again
-          }
-        }
+        await this.updateConfig((d) => d.projects.push({ name, match: rule ? [rule] : [] }));
         notify(rule
           ? { title: `Project "${name}" created`, body: `With ${w.name} (${rule.repo ? `repo ${rule.repo}` : `space "${rule.space}"`}).`, level: "success", timeout: 4000 }
-          : { title: `Project "${name}" created, empty`, body: "Add match rules (repo, machine, space) in mods/projects/projects.json.", level: "info", timeout: 6000 });
+          : { title: `Project "${name}" created, empty`, body: "Use its + to start a space in it.", level: "info", timeout: 6000 });
       } catch (e) {
         notify({ title: "Couldn't create the project", body: String(e?.message ?? e), level: "error" });
       }
@@ -549,6 +609,10 @@ export default class Spaces extends View {
         .when(g?.ahead > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.ansi2).child(`\u2191${g.ahead}`)))
         .when(g?.behind > 0, (el) => el.child(div().flex_none().text_size(11).text_color(t.ansi1).child(`\u2193${g.behind}`)))
         .when(Boolean(status), (el) => el.child(div().size(7).rounded(4).flex_none().bg(tone(t, status))))
+        .child(div().id(`project-add-${p.name}`).size(20).flex_none().flex().items_center().justify_center().rounded(4)
+          .text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground)).tooltip(`New space in ${p.name}`)
+          .on_click((_e, cx) => { cx.stop_propagation(); cx.spawn(this.addSpace(p, mine)); })
+          .child(svg("mods/workspace-chrome/plus.svg").size(11)))
         .child(svg(`mods/workspace-chrome/chevron-${folded ? "right" : "down"}.svg`).size(11).flex_none().text_color(t.dim)));
   }
 
@@ -584,15 +648,20 @@ export default class Spaces extends View {
     if (this.configError) out.push(div().px(8).py(4).text_size(11).text_color(t.blocked).child(this.configError));
     if (!this.projects.length) return [...out, ...this.byMachine(rows, t, collapsed, false)];
     const taken = new Set();
+    const ps = panes();
     for (const p of this.projects) {
-      const mine = rows.filter((r) => !taken.has(r.w.id) && this.projectFor(r.w, r.g) === p);
+      const mine = rows.filter((r) => !taken.has(r.w.id) && this.projectFor(r.w, r.g, ps) === p);
       mine.forEach((r) => taken.add(r.w.id));
       out.push(this.projectHead(p, mine, t, collapsed, p === this.projects[0]));
       if (this.pfolded.has(p.name)) continue;
       if (!collapsed && p.actions?.length) out.push(this.actionBar(p, mine, t));
       out.push(...mine.map((r) => (collapsed ? this.compact(r, t) : this.row({ ...r, member: true }, t))));
+      if (!mine.length && !collapsed) out.push(h_flex().id(`project-empty-${p.name}`).h(28).flex_none().px(8).gap(7).items_center().rounded(7)
+        .text_size(12).text_color(t.dim).hover((s) => s.bg(t.hover).text_color(t.foreground))
+        .on_click((_e, cx) => cx.spawn(this.addSpace(p, mine)))
+        .child(svg("mods/workspace-chrome/plus.svg").size(12)).child("New space in this project"));
     }
-    const ps = panes(), settling = Date.now() - this.started < SETTLE;
+    const settling = Date.now() - this.started < SETTLE;
     const rest = rows.filter((r) => !taken.has(r.w.id) && !(settling && !(where(r.w, ps) in this.git)));
     return [...out, ...this.byMachine(rest, t, collapsed, true)];
   }

@@ -34,6 +34,8 @@ Top to bottom, in the sidebar block (Herdr's `main` layout, `spaces` slot,
      - the branch of its first local main checkout, 11px `dim`, max 110px, left out on `master`/`main`;
      - `↑n` in `ansi2` and `↓n` in `ansi1`, 11px, when ahead or behind;
      - a 7px status dot in the theme's status colour (only when an agent reports a status);
+     - a 20px `+` (`plus.svg`, 11px, `dim`; hover `hover` background, `foreground`),
+       tooltip "New space in <project>";
      - `chevron-down.svg` / `chevron-right.svg`, 11px, `dim`.
 
      Hover: `hover` background. Tooltip: "shop: 2 spaces, working".
@@ -45,6 +47,9 @@ Top to bottom, in the sidebar block (Herdr's `main` layout, `spaces` slot,
      else the command, else "Shell in <folder>".
    - **Server chip:** same chip. Running: 1px `working` border, a 7px
      `working` dot, "Stop server". Stopped: `terminal.svg`, "Start server".
+   - **Empty project** (no space matches): one 28px row, radius 7, 12px `dim`,
+     `plus.svg` 12px and "New space in this project" (hover: `hover`,
+     `foreground`), doing what the header's `+` does.
    - **Member spaces:** Herdr's own space row (18px coloured avatar, name,
      git tail, worktrees nested under their checkout with `branch.svg`), plus
      a 12px `server.svg` in `dim` after the name of a space on another machine.
@@ -69,17 +74,29 @@ Herdr's compact rows (number and status glyph), no action rows.
   to the first project with a rule all of whose fields hold:
   `repo` (the name of its git repository, from the common `.git` folder, so
   worktrees match their main repo), `machine` (the space's machine name, `null`
-  for this computer), `space` (its exact name). Repo comes from the space's
-  first terminal's live folder.
+  for this computer), `space` (its exact name), `folder` (any of the space's
+  terminals works in that folder or below it, or the space was made there).
+  Repo comes from the space's first terminal's live folder.
 - **Fold.** Clicking a header folds or unfolds it. The folded set is kept in
   the copy's `localStorage` under `projects.folded`.
-- **New project.** Enter in the field appends `{ name, match }` to
-  `projects.json` with `writeTextFile(path, text, expected)` (re-read and
-  retried on a stale read, 3 tries), then the save reloads the mod. `match` takes
+- **Writing `projects.json`** (new project, new rule): the change is applied to
+  what is on disk now and written with `writeTextFile(path, text, expected)`; a
+  stale read is read and applied again (3 tries). The save reloads the mod.
+- **New project.** Enter in the field appends `{ name, match }`. `match` takes
   the selected space when no project has it: `{ repo }` for a git checkout,
-  else `{ space: <name> }`; otherwise `[]` (an empty project, its header with
-  no rows). A toast says which. A name already used is refused with a warning.
-  Esc or ✕ cancels. `projects.new` opens the field too (bind it to a key).
+  else `{ space: <name> }`; otherwise `[]` (an empty project). A toast says
+  which ("…created, empty": "Use its + to start a space in it"). A name already
+  used is refused with a warning. Esc or ✕ cancels. `projects.new` opens the
+  field too (bind it to a key).
+- **New space in a project** (the header's `+`, or the empty row). Folder: the
+  live folder of its first local space in a git checkout, else of its first
+  space in one (on that space's machine); with none, the system folder picker
+  (`pickFolder`, prompt "Folder for a new space in <project>"; Cancel does
+  nothing). Then `space.new {folder, machine}`. If no rule of the project already
+  takes that folder (its `repo`, `folder`, `machine` fields), one is added:
+  `{ repo }` when the folder is in a git checkout, else `{ folder }` (plus
+  `machine` for another machine), and a toast says "<project> now takes …".
+  `space`-name rules never count as taking a new space.
 - **Jump.** `ctrl-shift-j` (`projects.jump`) selects the next space of the
   shown space's project, wrapping, across machines. It works only while the
   sidebar shows.
@@ -127,6 +144,9 @@ Herdr's compact rows (number and status glyph), no action rows.
   - `jump` handles `ctrl-shift-j`.
   - `openCreate`, `newTarget`, `createProject`, `newProjectRow`: the title's `+`
     (an `InputState` + `Input` from `gpui-base`, Esc caught on the row's `on_key_down`).
+  - `addSpace(p, mine)`: the header's `+` (returns the task `cx.spawn` runs).
+  - `updateConfig(change)`: the compare-and-swap write both use.
+  - Helpers `under(dir, folder)` and `folders(space, panes)` for `folder` rules.
   - `row()` takes `member` for the server icon.
   - Constants: `GAP = 16` (px above headers), `SETTLE = 5000` (ms).
 - **Config:** `mods/projects/projects.json` (the person's own; the shared
@@ -180,6 +200,10 @@ Herdr's compact rows (number and status glyph), no action rows.
 - Spaces nobody named are called after their folder: two spaces in one repo
   get the same name. Rename one.
 - A `machine` rule claims every space on that machine.
+- A space's first terminal may sit outside its repo (a `run` tab in the home
+  folder): pick the folder for a new space from members whose git is known, and
+  match `folder` rules on every terminal, not just the first. A `{ folder }` rule
+  on the home folder would claim almost every space.
 - Herdr's `prompt` dialog can only run an app command, and a mod's own
   commands carry no arguments, so the typed name would be lost: the name
   field lives in the sidebar instead.
@@ -210,6 +234,11 @@ Herdr's compact rows (number and status glyph), no action rows.
 - With a space outside every project selected, `+`, a name and Enter make a
   project holding that space, and it leaves "Other spaces"; with a space that
   is already in a project, the new project shows as an empty header.
+- An empty project's `+` asks for a folder; picking a git checkout opens a
+  space there, adds `{ repo }` to the project, and the space shows under it
+  after the reload. Picking a plain folder adds `{ folder }` instead.
+- A project's `+` on a project already matching its repo opens a space in
+  that checkout and leaves `projects.json` as it was.
 - A `url` chip opens the browser; a `reuse` chip opens its tab once and then
   selects it; a `confirm` chip asks first and Escape runs nothing.
 - With a server on its port, the server chip reads "Stop server" with a

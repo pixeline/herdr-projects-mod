@@ -6,7 +6,8 @@ sit under one header, with the project's agent status, branch, ahead/behind,
 and a row of buttons (open a URL, a shell or log tail on another machine, a
 deploy behind a confirmation, a local dev server start/stop that shows
 whether its port listens). `ctrl-shift-j` jumps between a project's spaces,
-and the `+` next to the title creates a project from the selected space.
+the `+` next to the title creates a project from the selected space, and each
+project's own `+` starts a new space in it.
 
 ![Projects](preview.png)
 
@@ -16,7 +17,8 @@ Ask your coding agent to add it (Herdr's `AGENTS.md` explains how), or by hand:
 
 1. Copy `mods/projects/` into `~/.config/herdr-app/mods/`.
 2. Copy `projects.example.json` to `projects.json` in that folder and describe
-   your projects (rules: `repo`, `machine`, `space`; actions: see `RECIPE.md`).
+   your projects (rules: `repo`, `machine`, `space`, `folder`; actions: see `RECIPE.md`),
+   or start from an empty file and use the `+` buttons.
 3. Clone Herdr's layout and point its sidebar at the mod:
    `herdr-app do layout.clone '{"name":"main","as":"my-main"}'`, then in
    `layouts/my-main.json` change the `spaces` block's `"mod": "spaces"` to `"mod": "projects"`.
