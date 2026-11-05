@@ -1,0 +1,4 @@
+# Written by `herdr-app check` / Herdr, not part of the mod
+*.d.ts
+jsconfig.json
+.DS_Store
