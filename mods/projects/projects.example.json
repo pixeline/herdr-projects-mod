@@ -1,0 +1,68 @@
+{
+  "projects": [
+    {
+      "name": "shop",
+      "match": [
+        {
+          "repo": "shop"
+        },
+        {
+          "machine": "shop-vps"
+        }
+      ],
+      "actions": [
+        {
+          "label": "shop.test",
+          "icon": "monitor",
+          "url": "https://shop.test"
+        },
+        {
+          "label": "VPS shell",
+          "icon": "terminal",
+          "on": "shop-vps",
+          "reuse": true,
+          "tab": "vps",
+          "folder": "/var/www/shop/current"
+        },
+        {
+          "label": "Logs",
+          "icon": "file-text",
+          "on": "shop-vps",
+          "reuse": true,
+          "tab": "logs",
+          "folder": "/var/www/shop/current",
+          "argv": [
+            "tail",
+            "-n",
+            "200",
+            "-F",
+            "/var/www/shop/shared/storage/logs/laravel.log"
+          ]
+        },
+        {
+          "label": "Deploy",
+          "icon": "layers",
+          "on": null,
+          "tab": "deploy",
+          "folder": "/Users/me/shop",
+          "argv": [
+            "vendor/bin/dep",
+            "deploy",
+            "staging"
+          ],
+          "confirm": "Deploy to staging?",
+          "detail": "Runs vendor/bin/dep deploy staging."
+        },
+        {
+          "kind": "server",
+          "name": "Shop",
+          "on": null,
+          "tab": "run",
+          "folder": "/Users/me/shop",
+          "command": "npm run dev",
+          "port": 3000
+        }
+      ]
+    }
+  ]
+}

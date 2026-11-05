@@ -1,0 +1,6 @@
+herdr-projects-mod
+Copyright (c) 2026 Alexandre Plennevaux. The changes are MIT licensed (LICENSE).
+
+mods/projects/main.js is a modified copy of the `spaces` mod shipped with
+Herdr 0.1.13 (https://herdr.dev), Copyright the Herdr authors, licensed under
+the Apache License 2.0 (LICENSE-APACHE). Those parts stay under Apache-2.0.
